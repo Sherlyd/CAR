@@ -1,0 +1,4 @@
+sudo apt install openmpi-bin libopenmpi-dev   # para instalar MPI
+mpicc -O2 -o ejercicio2_matriz ejercicio2_matriz.c
+mpicc -O2 -o ejercicio3_biseccion ejercicio3_biseccion.c
+mpirun -np 4 --oversubscribe ./ejercicio2_matriz     # prueba local
