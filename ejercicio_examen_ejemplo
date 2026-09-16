@@ -1,0 +1,88 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+
+#define N 4 // Tamaño de las matrices cuadradas N x N
+
+int main(int argc, char **argv) {
+    int rank, size;
+    int i, j, k;
+    
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    // Cantidad de filas que procesará cada trabajador
+    int rows_per_proc = N / size;
+
+    double A[N][N], B[N][N], C[N][N];
+    double A_local[rows_per_proc][N];
+    double C_local[rows_per_proc][N];
+
+    // Inicialización de matrices en el proceso Maestro (rank 0)
+    if (rank == 0) {
+        for (i = 0; i < N; i++) {
+            for (j = 0; j < N; j++) {
+                A[i][j] = i + j;
+                B[i][j] = i * j;
+            }
+        }
+    }
+
+    // 1. El Master transmite la matriz B completa a TODOS los procesos
+    MPI_Bcast(B, N * N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // 2. El Master distribuye las filas de A entre todos los procesos
+    MPI_Scatter(A, rows_per_proc * N, MPI_DOUBLE, 
+                A_local, rows_per_proc * N, MPI_DOUBLE, 
+                0, MPI_COMM_WORLD);
+
+    // 3. Cómputo local del producto de submatrices
+    for (i = 0; i < rows_per_proc; i++) {
+        for (j = 0; j < N; j++) {
+            C_local[i][j] = 0.0;
+            for (k = 0; k < N; k++) {
+                C_local[i][j] += A_local[i][k] * B[k][j];
+            }
+        }
+    }
+
+    // 4. El Master recolecta todos los bloques C_local en la matriz C final (en rank 0)
+    MPI_Gather(C_local, rows_per_proc * N, MPI_DOUBLE, 
+               C, rows_per_proc * N, MPI_DOUBLE, 
+               0, MPI_COMM_WORLD);
+
+    // Impresión de resultados en el proceso Maestro
+    if (rank == 0) {
+        printf("Matriz C resultante en Rank 0:\n");
+        for (i = 0; i < N; i++) {
+            for (j = 0; j < N; j++) {
+                printf("%6.2f ", C[i][j]);
+            }
+            printf("\n");
+        }
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+
+# Compilación
+mpicc -O3 -o matriz_mpi matriz_mpi.c
+
+# Ejecución con 4 procesos
+mpirun -np 4 ./matriz_mpi
+
+echo "=== Iniciando Pruebas de Escalabilidad ==="
+for p in {1..6}
+do
+   echo "----------------------------------------"
+   echo "Ejecutando con $p procesos:"
+   mpirun -np $p ./matriz_mpi
+done
+echo "=== Pruebas Finalizadas ==="
+
+
+Cálculo del Speedup S El Speedup mide cuánto más rápido es el programa en paralelo en comparación con la versión de un solo procesador.
+Interpretación: Si T_1 = 12 segundos y con 4 procesos T_4 tarda 3.3 segundos, el Speedup es (12 / 3.3 = 3.63). Esto significa que el código corre 3.63 veces más rápido que el secuencial.

@@ -1,0 +1,654 @@
+1. La estructura básica de cualquier programa MPI
+
+Casi todos los ejercicios van a tener esta forma:
+
+```c
+include <stdio.h>
+include <stdlib.h>
+include <mpi.h>
+
+int main(int argc, char *argv[]) {
+
+    int rank, size;
+
+    MPI_Init(&argc, &argv);//Inicializa MPI.
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);//`rank` identifica qué proceso soy.
+    MPI_Comm_size(MPI_COMM_WORLD, &size);//Obtiene la cantidad total de procesos.
+
+    // Código paralelo
+
+    MPI_Finalize();
+
+    return 0;
+}
+```
+
+2. Comandos:
+
+Lugar de trabajo:
+~/Escritorio/Señales y sistemas/computacion de alto rendimiento/tps
+
+Entras:
+
+```bash
+cd ~/Escritorio/Señales\ y\ sistemas/computacion\ de\ alto\ rendimiento/tps
+```
+
+ Crear un archivo C
+
+```bash
+nano matriz.c
+```
+
+Escribir el código.
+
+Guardar:
+
+Ctrl + O
+
+Enter
+
+Salir:
+
+Ctrl + X
+
+---
+
+ 3. Compilar un programa MPI
+
+```bash
+mpicc matriz.c -o matriz
+```
+
+Esto genera:
+
+```text
+matriz.c
+matriz
+```
+
+El archivo `matriz` es el ejecutable/binario.
+
+ 4. Ejecutar el binario
+
+Con 2 procesos:
+
+```bash
+mpirun -np 2 ./matriz
+```
+
+Con 4:
+
+```bash
+mpirun -np 4 ./matriz
+```
+
+La idea fundamental es:
+
+mpicc        → compilar
+mpirun -np N → ejecutar con N procesos
+./programa   → ejecutar el binario
+---
+
+ 5. Las operaciones MPI que más hay que memorizar
+
+
+| Función       | Uso                  |
+| ------------- | -------------------- |
+| `MPI_Send`    | enviar datos         |
+| `MPI_Recv`    | recibir datos        |
+| `MPI_Bcast`   | enviar datos a todos |
+| `MPI_Scatter` | repartir datos       |
+| `MPI_Gather`  | juntar datos         |
+| `MPI_Reduce`  | combinar resultados  |
+| `MPI_Barrier` | sincronizar          |
+
+Las dos primeras son comunicación punto a punto.
+
+Las otras son comunicación colectiva.
+
+---
+
+ 6. MPI_Send y MPI_Recv
+
+La estructura:
+
+```
+MPI_Send(
+    datos,
+    cantidad,
+    tipo,
+    destino,
+    etiqueta,
+    MPI_COMM_WORLD
+);
+```
+
+Por ejemplo:
+
+```
+MPI_Send(&numero, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+```
+
+Significa:
+
+> Envío `numero`, que es un entero, al proceso `rank 1`.
+
+Recepción:
+
+```
+MPI_Recv(
+    &numero,
+    1,
+    MPI_INT,
+    origen,
+    etiqueta,
+    MPI_COMM_WORLD,
+    MPI_STATUS_IGNORE
+);
+```
+
+Ejemplo:
+
+```
+if (rank == 0) {
+
+    int numero = 10;
+
+    MPI_Send(&numero, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+
+} else if (rank == 1) {
+
+    int numero;
+
+    MPI_Recv(&numero, 1, MPI_INT, 0, 0,
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    printf("Recibi: %d\n", numero);
+}
+```
+
+---
+
+ 7. MPI_Bcast: el proceso 0 comparte información
+
+Esto es muy útil para matrices.
+
+Suponiendo que solamente el proceso 0 crea una matriz:
+
+```
+int A[4][4];
+```
+
+Y queremos que todos los procesos tengan A.
+
+Podemos hacer:
+
+```
+MPI_Bcast(A, 16, MPI_INT, 0, MPI_COMM_WORLD);
+```
+
+La estructura es:
+
+```
+MPI_Bcast(
+    datos,
+    cantidad,
+    tipo,
+    proceso_origen,
+    comunicador
+)
+```
+
+Entonces:
+
+```
+MPI_Bcast(A, 16, MPI_INT, 0, MPI_COMM_WORLD);
+```
+
+significa:
+
+```
+	A
+                ↓
+     rank 0
+          ↙  ↓  ↘
+rank1 rank2 rank3
+
+```
+
+Todos reciben la matriz.
+
+---
+
+ 8. MPI_Scatter: repartir una matriz
+
+Esta es muy importante para ejercicios de matrices.
+
+Supongamos:
+
+```
+A =
+1 2 3 4
+5 6 7 8
+9 10 11 12
+13 14 15 16
+```
+
+Tenemos 4 procesos.
+
+Podemos repartir una fila a cada proceso:
+
+```
+rank 0 → 1  2  3  4
+rank 1 → 5  6  7  8
+rank 2 → 9 10 11 12
+rank 3 → 13 14 15 16
+```
+
+Código:
+
+```
+MPI_Scatter(A,4,MPI_INT,fila,4,MPI_INT,0,MPI_COMM_WORL);
+```
+
+La estructura es:
+
+```
+MPI_Scatter(
+    datos_origen,
+    cantidad_por_proceso,
+    tipo,
+    datos_destino,
+    cantidad_recibida,
+    tipo,
+    root,
+    comunicador
+);
+```
+
+---
+
+ 9. MPI_Gather: juntar las partes
+
+Es exactamente la operación inversa.
+
+Si cada proceso tiene:
+
+```
+rank 0 → fila 0
+rank 1 → fila 1
+rank 2 → fila 2
+rank 3 → fila 3
+```
+
+podemos juntarlas en el proceso 0:
+
+```c
+MPI_Gather(fila,4,MPI_INT,A,4,MPI_INT,0,MPI_COMM_WORLD);
+```
+Resultado en rank 0:
+
+```
+A =
+1  2  3  4
+5  6  7  8
+9 10 11 12
+13 14 15 16
+```
+
+---
+
+ 10. Ejercicio clásico: sumar dos matrices
+
+Supongamos:
+
+```
+A =             B =
+
+1 2              10 20
+3 4              30 40
+```
+
+Queremos:
+
+```
+C = A + B
+
+11 22
+33 44
+```
+
+La operación es simplemente:
+
+```
+C[i][j] = A[i][j] + B[i][j];
+```
+
+Lo que es importante para MPI es cómo repartir el trabajo:
+
+ 11. Patrón para sumar matrices en paralelo
+
+Una solución sencilla para examen:
+
+1. Rank 0 crea A y B.
+2. `MPI_Bcast` manda A y B a todos.
+3. Cada proceso calcula algunas filas.
+4. `MPI_Gather` junta C en rank 0.
+5. Rank 0 imprime C.
+
+Por ejemplo, con una matriz de 4×4 y 4 procesos:
+
+```
+	     A y B
+	               ↓
+	      rank 0
+		│
+	     MPI_Bcast
+		↓
+ ┌─────────────┼─────────────┐
+ ↓             ↓             ↓
+rank 1       rank 2        rank 3
+
+cada proceso calcula sus filas
+
+       MPI_Gather
+                          ↓
+           rank 0
+                           ↓
+             C
+```
+
+La parte fundamental:
+
+```
+for (int i = rank; i < N; i += size) {
+
+    for (int j = 0; j < N; j++) {
+
+        C_local[i][j] = A[i][j] + B[i][j];
+
+    }
+}
+```
+
+Aunque hay otras formas de repartir filas, este patrón es muy útil porque funciona incluso cuando `N` no es exactamente divisible por `size`.
+
+---
+
+ 12. Producto de matrices: 
+
+El producto matricial es:
+
+```
+C = A × B
+```
+
+y cada elemento se calcula:
+
+```
+C[i][j] = Σ A[i][k] × B[k][j]
+```
+
+En C:
+
+```
+for (i = 0; i < N; i++) {
+
+    for (j = 0; j < N; j++) {
+
+        C[i][j] = 0;
+
+        for (k = 0; k < N; k++) {
+
+            C[i][j] += A[i][k] * B[k][j];
+
+        }
+    }
+}
+```
+
+---
+
+ 13. Implementación MPI sencilla del producto:
+
+* Rank 0 crea A y B.
+* B se comparte con todos mediante `MPI_Bcast`.
+* A se reparte mediante `MPI_Scatter`.
+* Cada proceso calcula determinadas filas de C.
+* `MPI_Gather` devuelve C al rank 0.
+
+Por ejemplo, para:
+
+```
+A =          B =
+
+1 2          5  6
+3 4          7  8
+```
+
+tenemos:
+
+```
+C =
+
+19 22
+43 50
+```
+
+---
+
+ Código completo
+
+```
+include <stdio.h>
+include <stdlib.h>
+include <mpi.h>
+
+define N 4
+
+int main(int argc, char *argv[]) {
+
+    int rank, size;
+
+    int A[N][N];
+    int B[N][N];
+    int C[N][N];
+
+    int filas_locales;
+
+    MPI_Init(&argc, &argv);
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    filas_locales = N / size;
+
+    int A_local[filas_locales][N];
+    int C_local[filas_locales][N];
+
+    /* --------------------------------
+       El proceso 0 crea las matrices
+       -------------------------------- */
+
+    if (rank == 0) {
+
+        for (int i = 0; i < N; i++) {
+
+            for (int j = 0; j < N; j++) {
+
+                A[i][j] = i + j + 1;
+                B[i][j] = i + j + 1;
+            }
+        }
+    }
+
+    /* --------------------------------
+       B se envía a todos
+       -------------------------------- */
+
+    MPI_Bcast(B, N * N, MPI_INT, 0, MPI_COMM_WORLD);
+
+    /* --------------------------------
+       A se reparte entre los procesos
+       -------------------------------- */
+
+    MPI_Scatter(
+        A,
+        filas_locales * N,
+        MPI_INT,
+        A_local,
+        filas_locales * N,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
+
+    /* --------------------------------
+       Cada proceso calcula sus filas
+       -------------------------------- */
+
+    for (int i = 0; i < filas_locales; i++) {
+
+        for (int j = 0; j < N; j++) {
+
+            C_local[i][j] = 0;
+
+            for (int k = 0; k < N; k++) {
+
+                C_local[i][j] +=
+                    A_local[i][k] * B[k][j];
+            }
+        }
+    }
+
+    /* --------------------------------
+       Se juntan los resultados en rank 0
+       -------------------------------- */
+
+    MPI_Gather(
+        C_local,
+        filas_locales * N,
+        MPI_INT,
+        C,
+        filas_locales * N,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
+
+    /* --------------------------------
+       Rank 0 muestra C
+       -------------------------------- */
+
+    if (rank == 0) {
+
+        printf("Matriz C:\n");
+
+        for (int i = 0; i < N; i++) {
+
+            for (int j = 0; j < N; j++) {
+
+                printf("%d ", C[i][j]);
+            }
+
+            printf("\n");
+        }
+    }
+
+    MPI_Finalize();
+
+    return 0;
+}
+```
+
+---
+
+ 14. Condición importante
+```
+filas_locales = N / size;
+```
+Por lo tanto, para `N = 4` necesita una cantidad de procesos que divida 4.
+
+Por ejemplo:
+
+```bash
+mpirun -np 2 ./matriz
+```
+o:
+```bash
+mpirun -np 4 ./matriz
+```
+
+Pero no:
+
+```bash
+mpirun -np 3 ./matriz
+```
+
+porque:
+
+```
+4 / 3 = 1
+```
+
+y quedaría una fila sin repartir.
+
+---
+
+ 15. Si piden "C debe quedar en rank 0", No significa que solamente rank 0 puede calcular. Significa que al finalizar el cálculo, la matriz completa C debe estar en rank 0.
+
+```
+MPI_Gather(...)
+```
+
+---
+ 20. Suma de elementos de un vector
+
+Supongamos:
+
+```text
+A = [1 2 3 4 5 6 7 8]
+```
+
+Cada proceso recibe una parte:
+
+```
+rank 0 → 1 2
+rank 1 → 3 4
+rank 2 → 5 6
+rank 3 → 7 8
+```
+
+Cada uno calcula:
+
+```text
+rank 0 → 3
+rank 1 → 7
+rank 2 → 11
+rank 3 → 15
+```
+
+Después podemos usar:
+
+```c
+MPI_Reduce(&suma_local,&suma_total,1,MPI_INT,MPI_SUM,0,MPI_COMM_WORLD);
+```
+
+Resultado en rank 0:
+
+```
+36
+```
+`MPI_Reduce` sirve para combinar resultados.
+
+Por ejemplo:
+
+```
+MPI_SUM
+MPI_MAX
+MPI_MIN
+MPI_PROD
+```
+

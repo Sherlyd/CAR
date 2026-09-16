@@ -1,0 +1,174 @@
+Implementar un algoritmo paralelo en C con MPI que cuente la cantidad total de veces que aparece un carácter (por ejemplo, 'A') en un arreglo masivo de datos y devuelva el resultado al proceso raíz.**
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+
+int main(int argc, char **argv) {
+    int rank, size;
+    long N_total = 1000000; // Tamaño total del arreglo
+    char *data = NULL;
+    
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    long N_local = N_total / size; // Porción por cada proceso
+    char *local_data = (char *)malloc(N_local * sizeof(char));
+
+    // Inicialización de los datos en el proceso 0
+    if (rank == 0) {
+        data = (char *)malloc(N_total * sizeof(char));
+        for (long i = 0; i < N_total; i++) {
+            data[i] = (i % 4 == 0) ? 'A' : 'C'; // Generación de ejemplo
+        }
+    }
+
+    // Distribución de porciones iguales a todos los procesos
+    MPI_Scatter(data, N_local, MPI_CHAR, 
+                local_data, N_local, MPI_CHAR, 
+                0, MPI_COMM_WORLD);
+
+    // Conteo local
+    long local_count = 0;
+    for (long i = 0; i < N_local; i++) {
+        if (local_data[i] == 'A') {
+            local_count++;
+        }
+    }
+
+    // Reducción global para sumar todos los conteos en el rango 0
+    long total_count = 0;
+    MPI_Reduce(&local_count, &total_count, 1, MPI_LONG, 
+               MPI_SUM, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        printf("Cantidad total de nucleótidos 'A': %ld\n", total_count);
+        free(data);
+    }
+
+    free(local_data);
+    MPI_Finalize();
+    return 0;
+}
+
+Escribir un programa que dado el archivo homo_sapiens_chromosome_1.fasta, lo
+particione en n partes (donde n es el número total del procesadores), envíe cada una de esas porciones a los respectivos procesos y busque la cantidad de veces que aparece la base A (adenina), devolviendo al master la cantidad de veces que cada proceso contabilizó. Finalmente calcule el porcentaje de A en el cromosoma.
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <mpi.h>
+
+int main(int argc, char **argv) {
+    int rank, size;
+    long total_len = 0;
+    char *full_sequence = NULL;
+
+    // Inicialización del entorno MPI
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    // -------------------------------------------------------------
+    // PASO 1: El Maestro lee y filtra el archivo FASTA
+    // -------------------------------------------------------------
+    if (rank == 0) {
+        FILE *f = fopen("homo_sapiens_chromosome_1.fasta", "r");
+        if (!f) {
+            printf("Error: No se pudo abrir el archivo FASTA.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
+        // Obtener tamaño del archivo para reservar memoria temporal
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        full_sequence = (char *)malloc((file_size + 1) * sizeof(char));
+        char line;
+
+        // Leer línea por línea ignorando el encabezado (inicia con '>')
+        while (fgets(line, sizeof(line), f)) {
+            if (line == '>') continue; // Salta el encabezado FASTA
+            
+            for (int i = 0; line[i] != '\0'; i++) {
+                // Filtrar solo caracteres válidos (ignorar saltos de línea 
+                if ((line[i] >= 'A' && line[i] <= 'Z') || (line[i] >= 'a' && line[i] <= 'z')) {
+                    full_sequence[total_len++] = line[i];
+                }
+            }
+        }
+        fclose(f);
+    }
+
+    // -------------------------------------------------------------
+    // PASO 2: Transmisión de la longitud total y división del trabajo
+    // -------------------------------------------------------------
+    MPI_Bcast(&total_len, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    // Tamaño de la porción correspondiente a cada proceso
+    long local_len = total_len / size;
+    char *local_sequence = (char *)malloc(local_len * sizeof(char));
+
+    // -------------------------------------------------------------
+    // PASO 3: Distribución del cromosoma con MPI_Scatter
+    // -------------------------------------------------------------
+    MPI_Scatter(full_sequence, local_len, MPI_CHAR,
+                local_sequence, local_len, MPI_CHAR,
+                0, MPI_COMM_WORLD);
+
+    // -------------------------------------------------------------
+    // PASO 4: Conteo local de la base 'A' (Adenina)
+    // -------------------------------------------------------------
+    long local_count = 0;
+    for (long i = 0; i < local_len; i++) {
+        if (local_sequence[i] == 'A' || local_sequence[i] == 'a') {
+            local_count++;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // PASO 5: Recolección de resultados individuales en el Maestro
+    // -------------------------------------------------------------
+    long *counts_per_process = NULL;
+    if (rank == 0) {
+        counts_per_process = (long *)malloc(size * sizeof(long));
+    }
+
+    // Cada proceso envía su conteo local al arreglo del Maestro
+    MPI_Gather(&local_count, 1, MPI_LONG,
+               counts_per_process, 1, MPI_LONG,
+               0, MPI_COMM_WORLD);
+
+    // -------------------------------------------------------------
+    // PASO 6: Reporte individual y porcentaje global (Master)
+    // -------------------------------------------------------------
+    if (rank == 0) {
+        long total_A = 0;
+
+        printf("=== CONTEO DE ADENINA (A) POR PROCESO ===\n");
+        for (int i = 0; i < size; i++) {
+            printf("Proceso %d contabilizo: %ld bases A\n", i, counts_per_process[i]);
+            total_A += counts_per_process[i];
+        }
+
+        // Cálculo del porcentaje sobre la longitud procesada
+        double porcentaje = ((double)total_A / (local_len * size)) * 100.0;
+
+        printf("\n=== RESULTADOS GLOBALES ===\n");
+        printf("Total de Adeninas (A) encontradas: %ld\n", total_A);
+        printf("Total de bases procesadas: %ld\n", local_len * size);
+        printf("Porcentaje de Adenina en el cromosoma: %.2f%%\n", porcentaje);
+
+        free(full_sequence);
+        free(counts_per_process);
+    }
+
+    // Liberación de memoria local y cierre de MPI
+    free(local_sequence);
+    MPI_Finalize();
+    return 0;
+}
+
